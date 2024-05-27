@@ -82,7 +82,7 @@ class EAC(BaseAggregator):
         super(EAC, self).__init__(
             base_estimators=base_estimators, pre_fitted=pre_fitted)
 
-        check_parameter(n_clusters, low=2, param_name='n_clusters')
+        check_parameter(n_clusters, low=2, param_name='n_clusters', include_left=True)
         self.n_clusters = n_clusters
 
         # set estimator weights
