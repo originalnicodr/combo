@@ -6,6 +6,8 @@
 
 import warnings
 import numpy as np
+import gc
+import psutil
 
 from scipy.cluster.hierarchy import fcluster
 from scipy.cluster.hierarchy import linkage
@@ -30,10 +32,10 @@ def _generate_similarity_mat(labels):
         Similarity matrix. If label_i == label_j, sim_mat[i,j] = 1, else 0.
 
     """
-    l_mat = np.repeat(labels, len(labels), axis=1)
+    l_mat = np.repeat(labels.astype(np.int8), len(labels), axis=1).astype(np.int8)
     l_mat_t = l_mat.T
 
-    sim_mat = np.equal(l_mat, l_mat_t).astype(int)
+    sim_mat = np.equal(l_mat, l_mat_t).astype(np.int8)
     return sim_mat
 
 
@@ -104,7 +106,9 @@ class EAC(BaseAggregator):
         n_samples = X.shape[0]
 
         # initialize similarity matrix
-        sim_mat_all = np.zeros([n_samples, n_samples])
+        # May be too small for some applications, but it works for us
+        sim_mat = np.zeros([n_samples, n_samples]).astype(np.int16)
+        print(psutil.virtual_memory())
 
         if self.pre_fitted:
             print("Training Skipped")
@@ -121,19 +125,38 @@ class EAC(BaseAggregator):
             labels = estimator.labels_.reshape(n_samples, 1)
 
             # generate the similarity matrix for the current estimator
-            sim_mat = _generate_similarity_mat(labels)
+            it_sim_mat = _generate_similarity_mat(labels)
+
+            del labels
+            gc.collect()
 
             # add to the main similarity mat
-            sim_mat_all = sim_mat_all + sim_mat
+            sim_mat = sim_mat + it_sim_mat
+            gc.collect()
 
+        print(psutil.virtual_memory())
         # get the average of the similarity mat
-        sim_mat_avg = np.divide(sim_mat_all, self.n_base_estimators_)
+        sim_mat = np.divide(sim_mat, self.n_base_estimators_)
+        gc.collect()
+        sim_mat = sim_mat.astype(np.float16)
+
+        gc.collect()
+        print(psutil.virtual_memory())
 
         # flip the similarity. smaller value implies more similarity
-        sim_mat_avg = np.abs(np.max(sim_mat_avg) - sim_mat_avg)
+        sim_mat = np.max(sim_mat) - sim_mat
+        gc.collect()
+        sim_mat = np.abs(sim_mat)
+        gc.collect()
+        sim_mat = sim_mat.astype(np.float16)
+
+        gc.collect()
+        print(psutil.virtual_memory())
 
         # build clusters
-        self.Z_ = linkage(sim_mat_avg, method=self.linkage_method)
+        self.Z_ = linkage(sim_mat, method=self.linkage_method)
+        del sim_mat
+        gc.collect()
         self.labels_ = fcluster(self.Z_, self.n_clusters, criterion='maxclust')
 
         # it may leads to different number of clusters as specified by the user
